@@ -1,59 +1,310 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Travel.pk fare-hold service
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A small HTTP service that takes a fare from hold → payment → issued
+ticket, built around the ninety seconds where money and seat inventory
+can most easily fall out of sync. Synthetic exercise: no real payment or
+airline APIs, no credentials, public pages only. See `RESEARCH.md` for
+the travel.pk public-page notes and `STATES.md` for the full state
+table.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **PHP 8.2 / Laravel 12**, SQLite (file-based) for zero-setup local
+  storage — "local DB" per the brief, and portable to any reviewer's
+  machine without a MySQL/Postgres server.
+- Plain Eloquent + a thin repository layer (no query builder magic, no
+  ORM-agnostic abstraction nobody asked for).
+- No external services: the PSP and the airline are both in-process fakes
+  (`App\Services\Psp\FakePspClient`, `App\Services\Airline\FakeAirlineClient`).
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Install, run, test
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```bash
+composer install
+cp .env.example .env        # already defaults to sqlite
+php artisan key:generate
+touch database/database.sqlite   # if it doesn't already exist
+php artisan migrate --seed       # creates the schema + 2 demo partner keys + 6 fares
+php artisan serve                # http://127.0.0.1:8000
 
-## Learning Laravel
+# in another terminal, to see the PSP's async webhook actually arrive:
+php artisan queue:work
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+`composer test` runs the whole suite in one command (41 tests, SQLite
+in-memory, no network, ~1s). `php artisan test` works too.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+The seeder prints two bearer keys to the console — copy them from there,
+or re-run `php artisan db:seed --class=Database\\Seeders\\PartnerSeeder`.
+They're fixed, documented, local-only fixtures, not real secrets:
 
-## Laravel Sponsors
+```
+Travel.pk Backend (full access): Bearer demo_full_11a9f3c7b2e84d6fa0c5e9d1b3a7f2c4
+Travel.pk Reporting (read-only): Bearer demo_readonly_7f2a9c1e4b6d803f5a2c7e9b1d4f6a80
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Data model and money
 
-### Premium Partners
+Six fare tables down to one real decision: **money is always an integer
+count of paisa** (`App\Support\Money`), never a float. Supplier prices
+arrive as decimal rupee strings (`"84250.50"`) and are parsed by regex
+into whole rupees + a zero-padded 2-digit paisa remainder — no
+floating-point multiplication anywhere near money.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Schema (`database/migrations/`): `partners` (bearer key hash + scopes),
+`fares` (route, carrier, price breakdown, `seats_left`, `fare_rules`
+json), `bookings` (the hold *is* the booking — one row carries it from
+`hold` through to `ticketed`/`refunded`, with a price snapshot and
+fare-rules snapshot taken at hold time so later fare changes can't
+retroactively change what a customer already locked in), `payments`
+(doubles as the idempotency ledger), `webhook_events` (event-id dedup),
+`airline_attempts` (per-booking ticketing ledger, keyed by a fixed
+idempotency key), `customer_tokens`.
 
-## Contributing
+Six seeded fares across `LHE-KHI`, `KHI-DXB`, `ISB-JED`
+(`database/seeders/FareSeeder.php`): two non-refundable (AirBlue
+LHE-KHI, FlyDubai KHI-DXB), and the Emirates KHI-DXB fare has exactly one
+seat left, for the last-seat race.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Auth
 
-## Code of Conduct
+Two unrelated credential types, both opaque bearer tokens, both hashed
+(SHA-256) at rest — only the plaintext ever shown once, at creation.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- **Partner keys**, scoped (`holds.write`, `payments.write`,
+  `bookings.read`, `bookings.write`, `fares.read`). Missing scope → `403`.
+  Invalid/inactive key → `401`.
+- **Customer tokens**, opaque, 24h, minted one per booking at hold time
+  and scoped to exactly that booking. A valid token against a *different*
+  booking's reference returns `404`, not `403` — it should look
+  indistinguishable from that booking not existing, not reveal that it
+  exists but isn't yours.
 
-## Security Vulnerabilities
+Both share the `Authorization: Bearer <token>` header; `GET/POST
+bookings/{reference}` middleware tries a partner key first, then falls
+back to a customer token scoped to that specific booking.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## API
 
-## License
+All responses: `{"data": {...}}` on resource reads, or a flat body for
+actions; errors are always `{"error": {"code": "...", "message": "..."}}`.
+Money fields are integer paisa.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### `POST /api/v1/holds` — partner, scope `holds.write`
+
+```json
+{ "fare_id": 3, "passenger_name": "Ali Raza", "supplier_mode": "normal" }
+```
+
+`supplier_mode` (`normal` | `slow` | `flaky`, default `normal`) is a
+**test/demo hook**, not something a real partner API would expose — it's
+how a caller forces the fake airline's behaviour for this one booking, so
+the failure paths can be driven deterministically instead of relying on a
+real supplier actually misbehaving.
+
+`201` — booking (`status: "hold"`, `expires_at` 20 minutes out) +
+`customer_token` (shown once). `409 seat_unavailable` if the fare has
+no seats left. `422` if `fare_id` doesn't exist.
+
+### `POST /api/v1/holds/{reference}/payments` — partner, scope `payments.write`
+
+Requires `Idempotency-Key`. No body is required — the charge amount is
+always the booking's own price snapshot, never client-supplied, so a
+caller can't alter what gets charged by editing the request.
+
+`202` `{"payment_id", "booking_reference", "status": "pending", "amount_paisa"}`.
+Same key + same body → the exact same `202` replayed, no new charge. Same
+key + different body → `409 idempotency_key_conflict`. Same key, another
+request for it still in flight → `409 idempotency_key_in_progress`.
+Hold already expired → `409 hold_expired` (and the seat is released as a
+side effect of noticing). Booking not currently `hold` for any other
+reason → `409 booking_state_conflict`. Missing header → `400
+idempotency_key_required`.
+
+### `POST /api/webhooks/psp` — HMAC-SHA256 signed, no bearer auth
+
+Headers `X-Psp-Timestamp` (unix seconds) and `X-Psp-Signature` =
+`hash_hmac('sha256', "{timestamp}.{raw body}", shared_secret)`, tolerance
+`PSP_WEBHOOK_TOLERANCE_SECONDS` (default 300s). Invalid or stale → `401
+invalid_webhook_signature`.
+
+```json
+{ "event_id": "evt_...", "payment_reference": "psp_...", "status": "succeeded", "failure_reason": null }
+```
+
+Always `200` (the PSP only cares that delivery succeeded); the business
+outcome is in the body: `ticketed`, `payment_failed`,
+`refunded_hold_expired`, `refunded_customer_cancelled`,
+`ticketing_failed_refunded`, `already_processed`,
+`ignored_duplicate_event`, `ignored_unknown_payment`. See `STATES.md`.
+
+Signing a webhook by hand, against a running `php artisan serve`:
+
+```bash
+ts=$(date +%s)
+body='{"event_id":"evt-1","payment_reference":"psp_...","status":"succeeded"}'
+sig=$(php -r 'echo hash_hmac("sha256",$argv[1].".".$argv[2],$argv[3]);' "$ts" "$body" "local-dev-psp-shared-secret")
+curl -X POST http://127.0.0.1:8000/api/webhooks/psp \
+  -H "Content-Type: application/json" -H "X-Psp-Timestamp: $ts" -H "X-Psp-Signature: $sig" -d "$body"
+```
+
+### `GET /api/v1/bookings/{reference}` — partner (`bookings.read`) or customer token
+
+Reading a booking past its `expires_at` lazily expires it first (releases
+the seat) — correctness never depends on the scheduler having run.
+
+### `POST /api/v1/bookings/{reference}/cancel` — partner (`bookings.write`) or customer token
+
+- `hold` / `payment_failed` → `200`, seat released, no refund (nothing
+  was charged).
+- `payment_pending` → `202 cancellation_pending`; the payment's real
+  outcome isn't known yet, so nothing is released or refunded until the
+  webhook resolves it (see `STATES.md`).
+- `paid` / `ticketed`, refundable fare → `200`, refund = total minus a
+  flat cancellation fee (`REFUNDABLE_CANCELLATION_FEE_PAISA`, default
+  PKR 1,500).
+- `paid` / `ticketed`, non-refundable fare → `200`, refund = tax only,
+  base fare forfeited.
+- Anything already settled (`expired`, `cancelled`, `refunded`,
+  `partially_refunded`) → `409 booking_state_conflict`.
+
+### `GET /api/v1/fares` — partner, scope `fares.read`
+
+Lists the seeded fares, for picking a `fare_id` to test against.
+
+## Concurrency
+
+The last-seat race is settled by one atomic statement —
+`UPDATE fares SET seats_left = seats_left - 1 WHERE id = ? AND seats_left
+> 0` — not a read-then-write check. Whichever request's `UPDATE` matches
+a row wins; the other updates zero rows and gets `409`. This is correct
+under real concurrent load on any SQL engine, not just under the
+sequential test that exercises it (see "Tests" below for why it's tested
+sequentially rather than with real parallel threads).
+
+Idempotency is enforced the same way: the first `INSERT` into `payments`
+under a given `(partner_id, idempotency_key)` wins; a concurrent duplicate
+insert hits the unique constraint, and the loser re-reads the winner's
+row to decide replay vs. conflict vs. in-progress.
+
+Webhook double-delivery is handled the same way twice over: an `event_id`
+claim (unique constraint) stops a byte-for-byte redelivery, and a
+`lockForUpdate` + status re-check on the `payments` row stops two
+*differently*-IDed deliveries for the same logical outcome from both
+applying.
+
+## Hold expiry
+
+Enforced lazily first: any read or write that touches a booking past its
+`expires_at` expires it on the spot (releases the seat, sets
+`status=expired`) before doing anything else — correctness never depends
+on a scheduler running. `php artisan bookings:expire-stale` (registered
+in `routes/console.php` as an every-minute scheduled task) just reclaims
+seats for bookings nobody has touched since they went stale, which
+otherwise would stay inventory-locked until someone happens to read them.
+Covers both `hold` and `payment_pending` bookings, since starting a
+payment doesn't stop the clock (see "payment landing after hold expiry"
+in `STATES.md`).
+
+## Tests
+
+`composer test` / `php artisan test` — 41 tests, 125 assertions, SQLite
+in-memory, `QUEUE_CONNECTION=sync`, `PSP_SIMULATE_WEBHOOK=false` (tests
+drive the webhook endpoint directly with a hand-signed payload instead of
+waiting on the queued job, so they can assert exact timing and outcomes).
+
+| Failure path from the brief | Status |
+|---|---|
+| Two holds racing for the last seat | **Done** — see caveat below |
+| A replayed Idempotency-Key | Done |
+| That key reused with a different body | Done |
+| Supplier timeout then retry | Done |
+| Payment landing after hold expiry | Done |
+| A cancel during a pending payment | Done (both eventual-success and eventual-failure outcomes) |
+| Flaky supplier, duplicate-safe retry | Done |
+| Webhook replay / redelivery (event-id dedup) | Done |
+| Two differently-id'd webhook deliveries for one payment | Done |
+| Signature / timestamp verification | Done |
+| Auth: scopes, cross-booking 404, expired/invalid tokens | Done |
+| Money parsing from supplier strings | Done (unit) |
+| **Partial** — two *simultaneous* payment-start requests under a brand-new key (the true network race, not the already-in-flight case) | The unique-constraint race path exists and is exercised by directly seeding an in-flight `payments` row rather than firing two real parallel HTTP requests from PHPUnit (which runs single-threaded) |
+| **Partial** — the last-seat race is two *sequential* calls, not two OS threads | The atomic `UPDATE ... WHERE seats_left > 0` is what actually provides correctness under concurrency; sequential calls prove the guard rejects the second claim, which is the same code path real concurrent requests hit. Verified manually with two simultaneous `curl` requests against `php artisan serve` during development; not automated |
+| **Not done** — rate limiting / abuse protection | Not implemented |
+| **Not done** — load/performance testing at volume | Discussed qualitatively below, not benchmarked |
+| **Not done** — voiding the PNR with the airline on cancel | Out of scope; cancel only does refund arithmetic + seat release |
+
+A test asserting what it doesn't check costs a lot — so where a test says
+"refunded", it asserts the exact `refunded_paisa` figure and the
+resulting `status`, not just a `200`.
+
+## What we traded away
+
+- **SQLite over Postgres/MySQL**: zero setup for whoever's reviewing
+  this, at the cost of SQLite's single-writer model (see below). The
+  atomic-decrement and row-locking logic is written in plain Eloquent/
+  query-builder calls that work unchanged on MySQL — swapping
+  `DB_CONNECTION` is the only change needed to run it there.
+- **Stubs run in-process, not as separate servers.** "Slow" supplier mode
+  compares a configured simulated latency against the timeout rather than
+  actually sleeping 6 seconds — a real HTTP client aborts at its timeout
+  rather than waiting out the slow response anyway, and sleeping for real
+  would make the test suite slow for no benefit.
+- **The PSP's async webhook is delivered by an in-process queued job
+  calling the same webhook-handling code the real HTTP route uses**,
+  rather than a real self-loopback HTTP call — avoids flaky tests that
+  depend on a real server listening on a real port while the queue
+  worker fires. The HTTP route itself still does full HMAC verification
+  independent of this, so `curl`-ing it from the outside works exactly as
+  documented above.
+- **Ticketing runs synchronously inside the webhook request**, not on its
+  own queue. Simplest correct option for this scope; the real cost is
+  below.
+- **No "void the PNR" call to the airline on cancellation** — out of
+  scope; refund arithmetic + seat release only.
+- **Flat, global cancellation fee** rather than a fully supplier-driven
+  fare-rules fee schedule — `fare_rules` is stored and returned per
+  booking, but the actual fee number is one config value, for consistency
+  across the fixture data rather than six different ad hoc numbers.
+- **No partner-level booking ownership** — any partner key with the right
+  scope can act on any booking; only the customer token is
+  booking-scoped. Matches a single travel.pk backend calling its own
+  internal service, not a true multi-tenant marketplace.
+
+## What breaks first at 50 bookings a minute on one VPS
+
+At 50/min (under 1 request/second, bursty at most), raw throughput isn't
+actually the problem — a handful of writes per second is nothing for
+either SQLite or a real RDBMS. Two things would hurt before the database
+does:
+
+1. **`php artisan serve` is single-threaded.** It's Symfony's dev server,
+   not meant to run anything concurrently without
+   `PHP_CLI_SERVER_WORKERS` set — one slow request (a webhook that
+   happens to hit the "slow" supplier path and burns through 3 retries)
+   stalls every other request behind it, including unrelated holds. This
+   is the first real limit, and it's a deployment problem (php-fpm /
+   Octane / nginx), not a design problem.
+2. **Ticketing runs synchronously inside the webhook handler.** A real
+   airline integration misbehaving ties up that request (and, given (1),
+   the whole server) for the duration of every retry. The fix is moving
+   `AirlineTicketingService::issueTicket` onto its own queued job keyed
+   by the same idempotency key, so the webhook can `ack` immediately and
+   a slow supplier call only blocks *that* booking's own ticketing job,
+   not the next unrelated webhook.
+
+Once those are fixed and volume climbs well past 50/min, **SQLite's
+single-writer lock** becomes the next ceiling — every write transaction
+(hold, payment, webhook, cancel) currently takes an exclusive lock for
+its duration, and in SQLite's default rollback-journal mode (not WAL)
+that blocks readers too, not just other writers. The fix at that point is
+Postgres/MySQL with row-level locking, which this codebase already uses
+(`lockForUpdate()`) in a way that's portable to either without changes.
+
+## Environment
+
+See `.env.example`. Domain-specific knobs:
+`HOLD_TTL_MINUTES` (20), `CUSTOMER_TOKEN_TTL_HOURS` (24),
+`PSP_WEBHOOK_SECRET`, `PSP_WEBHOOK_TOLERANCE_SECONDS` (300),
+`AIRLINE_TIMEOUT_MS` (3000), `AIRLINE_SLOW_DELAY_MS` (6000),
+`AIRLINE_MAX_ATTEMPTS` (3), `REFUNDABLE_CANCELLATION_FEE_PAISA` (150000 =
+PKR 1,500).
