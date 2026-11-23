@@ -250,6 +250,26 @@ $ curl -X POST http://127.0.0.1:8000/api/v1/bookings/TPK-E5ZCWD/cancel \
 `HTTP 200` — `9412575 - 150000` (the flat refundable-cancellation fee) `=
 9262575`, exactly.
 
+## Screenshots
+
+The same flow above, watched change row-by-row in phpMyAdmin
+(`docs/screenshots/`). This run pointed the identical codebase at a local
+MySQL database instead of SQLite — no code changes, `DB_CONNECTION=mysql`
+in `.env` only — purely so there was an admin GUI to screenshot; SQLite
+stays the committed default (see "What we traded away").
+
+| | |
+|---|---|
+| [`01-fares-before.png`](docs/screenshots/01-fares-before.png) | Baseline: 6 seeded fares, the Emirates KHI-DXB row (`id=3`) at `seats_left=1`. |
+| [`02-fares-after-hold.png`](docs/screenshots/02-fares-after-hold.png) | After `POST /holds`: `seats_left` for that row drops to `0`. |
+| [`03-bookings-hold.png`](docs/screenshots/03-bookings-hold.png) | The new `bookings` row: `status=hold`, price snapshot taken. |
+| [`04-bookings-payment-pending.png`](docs/screenshots/04-bookings-payment-pending.png) | After `POST .../payments`: `status` flips to `payment_pending`. |
+| [`05-payments-initiated.png`](docs/screenshots/05-payments-initiated.png) | The `payments` row created by that call — the idempotency ledger (`idempotency_key`, `request_fingerprint`), `status=initiated`. |
+| [`06-payments-succeeded.png`](docs/screenshots/06-payments-succeeded.png) | After the signed PSP webhook: `status=succeeded`. |
+| [`07-bookings-ticketed.png`](docs/screenshots/07-bookings-ticketed.png) | Same webhook, same transaction: `bookings.status=ticketed`. |
+| [`08-bookings-refunded.png`](docs/screenshots/08-bookings-refunded.png) | After `POST .../cancel`: `status=partially_refunded`. |
+| [`09-fares-after-cancel.png`](docs/screenshots/09-fares-after-cancel.png) | `fares.seats_left` for `id=3` back to `1` — the seat was released. |
+
 ## Concurrency
 
 The last-seat race is settled by one atomic statement —
