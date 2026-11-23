@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    'psp' => [
+        'webhook_secret' => env('PSP_WEBHOOK_SECRET', 'local-dev-psp-shared-secret'),
+        'webhook_tolerance_seconds' => (int) env('PSP_WEBHOOK_TOLERANCE_SECONDS', 300),
+    ],
+
+    'airline' => [
+        'timeout_ms' => (int) env('AIRLINE_TIMEOUT_MS', 3000),
+        'slow_delay_ms' => (int) env('AIRLINE_SLOW_DELAY_MS', 6000),
+        'max_attempts' => (int) env('AIRLINE_MAX_ATTEMPTS', 3),
+    ],
+
 ];
