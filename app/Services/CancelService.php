@@ -16,8 +16,7 @@ class CancelService
         private FareRepository $fares,
         private HoldExpiryService $holdExpiry,
         private RefundService $refunds,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{status: int, body: array}

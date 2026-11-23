@@ -22,8 +22,7 @@ class PaymentService
         private PaymentRepository $payments,
         private HoldExpiryService $holdExpiry,
         private FakePspClient $psp,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{status: int, body: array}
@@ -41,7 +40,7 @@ class PaymentService
         $booking = $this->holdExpiry->expireIfDue($booking);
 
         if ($booking->status === BookingStatus::Expired) {
-            throw new HoldExpiredException();
+            throw new HoldExpiredException;
         }
 
         if ($booking->status !== BookingStatus::Hold) {
@@ -93,11 +92,11 @@ class PaymentService
     private function replay(Payment $payment, string $fingerprint): array
     {
         if ($payment->request_fingerprint !== $fingerprint) {
-            throw new IdempotencyKeyConflictException();
+            throw new IdempotencyKeyConflictException;
         }
 
         if ($payment->response_status === null) {
-            throw new IdempotencyKeyInProgressException();
+            throw new IdempotencyKeyInProgressException;
         }
 
         return ['status' => $payment->response_status, 'body' => $payment->response_body];

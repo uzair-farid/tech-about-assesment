@@ -9,9 +9,7 @@ use Illuminate\Http\JsonResponse;
 
 class WebhookController extends Controller
 {
-    public function __construct(private WebhookService $webhooks)
-    {
-    }
+    public function __construct(private WebhookService $webhooks) {}
 
     public function psp(PspWebhookRequest $request): JsonResponse
     {

@@ -33,7 +33,7 @@ class FareRepository
             ->decrement('seats_left');
 
         if ($affected === 0) {
-            throw new SeatUnavailableException();
+            throw new SeatUnavailableException;
         }
 
         return Fare::query()->findOrFail($fareId);

@@ -11,9 +11,7 @@ use Illuminate\Http\JsonResponse;
 
 class HoldController extends Controller
 {
-    public function __construct(private HoldService $holds)
-    {
-    }
+    public function __construct(private HoldService $holds) {}
 
     public function store(CreateHoldRequest $request): JsonResponse
     {
@@ -26,7 +24,7 @@ class HoldController extends Controller
 
         $booking = $result['booking']->load('fare');
 
-        return (BookingResource::make($booking))
+        return BookingResource::make($booking)
             ->additional(['customer_token' => $result['customer_token']])
             ->response()
             ->setStatusCode(201);

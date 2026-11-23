@@ -19,8 +19,7 @@ class HoldExpiryService
     public function __construct(
         private BookingRepository $bookings,
         private FareRepository $fares,
-    ) {
-    }
+    ) {}
 
     public function expireIfDue(Booking $booking): Booking
     {

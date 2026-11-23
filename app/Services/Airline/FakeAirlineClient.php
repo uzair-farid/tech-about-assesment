@@ -18,9 +18,7 @@ use Illuminate\Support\Str;
  */
 class FakeAirlineClient
 {
-    public function __construct(private AirlineAttemptRepository $attempts)
-    {
-    }
+    public function __construct(private AirlineAttemptRepository $attempts) {}
 
     public function issue(string $idempotencyKey, int $bookingId, SupplierMode $mode): array
     {

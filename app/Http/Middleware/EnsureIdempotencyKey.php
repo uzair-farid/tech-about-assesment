@@ -14,7 +14,7 @@ class EnsureIdempotencyKey
         $key = trim((string) $request->header('Idempotency-Key', ''));
 
         if ($key === '') {
-            throw new IdempotencyKeyMissingException();
+            throw new IdempotencyKeyMissingException;
         }
 
         $request->attributes->set('idempotency_key', $key);

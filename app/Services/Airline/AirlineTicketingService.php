@@ -8,9 +8,7 @@ use App\Models\Booking;
 
 class AirlineTicketingService
 {
-    public function __construct(private FakeAirlineClient $client)
-    {
-    }
+    public function __construct(private FakeAirlineClient $client) {}
 
     /**
      * Retries under the same idempotency key so a flaky supplier that

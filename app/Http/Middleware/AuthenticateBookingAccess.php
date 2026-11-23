@@ -52,7 +52,7 @@ class AuthenticateBookingAccess
         $booking = $request->route('booking');
 
         if ($booking instanceof Booking && $customerToken->booking_id !== $booking->id) {
-            throw new NotFoundApiException();
+            throw new NotFoundApiException;
         }
 
         $customerToken->forceFill(['last_used_at' => now()])->saveQuietly();

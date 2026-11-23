@@ -10,9 +10,7 @@ use Illuminate\Http\Request;
 
 class PaymentController extends Controller
 {
-    public function __construct(private PaymentService $payments)
-    {
-    }
+    public function __construct(private PaymentService $payments) {}
 
     public function store(Request $request, Booking $booking): JsonResponse
     {

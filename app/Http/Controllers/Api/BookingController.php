@@ -14,8 +14,7 @@ class BookingController extends Controller
     public function __construct(
         private HoldExpiryService $holdExpiry,
         private CancelService $cancels,
-    ) {
-    }
+    ) {}
 
     public function show(Booking $booking): BookingResource
     {

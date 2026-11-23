@@ -7,7 +7,6 @@ use App\Enums\PaymentStatus;
 use App\Exceptions\InvalidPayloadException;
 use App\Exceptions\Supplier\SupplierTimeoutException;
 use App\Exceptions\Supplier\SupplierUnavailableException;
-use App\Models\Booking;
 use App\Models\Payment;
 use App\Repositories\BookingRepository;
 use App\Repositories\FareRepository;
@@ -26,8 +25,7 @@ class WebhookService
         private AirlineTicketingService $ticketing,
         private RefundService $refunds,
         private HoldExpiryService $holdExpiry,
-    ) {
-    }
+    ) {}
 
     /**
      * Idempotent in two layers: the event_id claim stops a byte-for-byte

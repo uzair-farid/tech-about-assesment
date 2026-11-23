@@ -1,8 +1,18 @@
 <?php
 
+use App\Exceptions\ApiException;
+use App\Http\Middleware\AuthenticateBookingAccess;
+use App\Http\Middleware\AuthenticatePartner;
+use App\Http\Middleware\EnsureIdempotencyKey;
+use App\Http\Middleware\VerifyPspSignature;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -13,20 +23,20 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'partner.auth' => \App\Http\Middleware\AuthenticatePartner::class,
-            'booking.auth' => \App\Http\Middleware\AuthenticateBookingAccess::class,
-            'psp.signature' => \App\Http\Middleware\VerifyPspSignature::class,
-            'idempotent' => \App\Http\Middleware\EnsureIdempotencyKey::class,
+            'partner.auth' => AuthenticatePartner::class,
+            'booking.auth' => AuthenticateBookingAccess::class,
+            'psp.signature' => VerifyPspSignature::class,
+            'idempotent' => EnsureIdempotencyKey::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(fn () => true);
 
-        $exceptions->render(function (\App\Exceptions\ApiException $e) {
+        $exceptions->render(function (ApiException $e) {
             return $e->render();
         });
 
-        $exceptions->render(function (\Illuminate\Validation\ValidationException $e) {
+        $exceptions->render(function (ValidationException $e) {
             return response()->json([
                 'error' => [
                     'code' => 'validation_failed',
@@ -36,19 +46,19 @@ return Application::configure(basePath: dirname(__DIR__))
             ], 422);
         });
 
-        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e) {
+        $exceptions->render(function (AuthenticationException $e) {
             return response()->json([
                 'error' => ['code' => 'unauthenticated', 'message' => 'Authentication required.'],
             ], 401);
         });
 
-        $exceptions->render(function (\Illuminate\Database\Eloquent\ModelNotFoundException|\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e) {
+        $exceptions->render(function (ModelNotFoundException|NotFoundHttpException $e) {
             return response()->json([
                 'error' => ['code' => 'not_found', 'message' => 'The requested resource was not found.'],
             ], 404);
         });
 
-        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException $e) {
+        $exceptions->render(function (MethodNotAllowedHttpException $e) {
             return response()->json([
                 'error' => ['code' => 'method_not_allowed', 'message' => 'Method not allowed.'],
             ], 405);

@@ -25,8 +25,7 @@ class DeliverPspWebhookJob implements ShouldQueue
         public int $paymentId,
         public string $pspReference,
         public string $outcome,
-    ) {
-    }
+    ) {}
 
     public function handle(WebhookService $webhooks): void
     {

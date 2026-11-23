@@ -19,8 +19,7 @@ class HoldService
         private FareRepository $fares,
         private BookingRepository $bookings,
         private CustomerTokenRepository $customerTokens,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array{booking: Booking, customer_token: string}
