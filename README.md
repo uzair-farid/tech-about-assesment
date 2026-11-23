@@ -172,6 +172,84 @@ the seat) — correctness never depends on the scheduler having run.
 
 Lists the seeded fares, for picking a `fare_id` to test against.
 
+## Worked example
+
+Real output from a running instance (`php artisan serve`), the seeded
+one-seat Emirates fare (`fare_id=3`), against a freshly-seeded database —
+included so this can be reviewed without having to run anything.
+
+**1. Hold the last seat, then try again**
+
+```
+$ curl -X POST http://127.0.0.1:8000/api/v1/holds \
+    -H "Authorization: Bearer demo_full_11a9f3c7b2e84d6fa0c5e9d1b3a7f2c4" \
+    -H "Content-Type: application/json" \
+    -d '{"fare_id":3,"passenger_name":"Sana Tariq"}'
+```
+```json
+{
+  "data": {
+    "reference": "TPK-E5ZCWD",
+    "status": "hold",
+    "fare": {"origin": "KHI", "destination": "DXB", "carrier_code": "EK", "flight_number": "EK607", "departs_at": "2026-12-11T02:15:00+00:00"},
+    "pricing": {"currency": "PKR", "base_fare_paisa": 8425050, "tax_paisa": 987525, "total_paisa": 9412575, "refunded_paisa": 0},
+    "refundable": true, "passenger_name": "Sana Tariq", "pnr": null,
+    "expires_at": "2026-11-23T13:09:03+00:00", "cancel_requested_at": null, "cancelled_at": null,
+    "created_at": "2026-11-23T12:49:03+00:00"
+  },
+  "customer_token": "erowCE3HjHGEQ1rDtabaM2MUV9zaflSkGbXi1EvjvrAJDyyf"
+}
+```
+A second hold on the same fare, immediately after:
+```json
+{"error": {"code": "seat_unavailable", "message": "No seats are left on this fare."}}
+```
+`HTTP 409`
+
+**2. Start a payment, then replay it, then try reusing the key with a different body**
+
+```
+$ curl -X POST http://127.0.0.1:8000/api/v1/holds/TPK-E5ZCWD/payments \
+    -H "Authorization: Bearer demo_full_11a9f3c7b2e84d6fa0c5e9d1b3a7f2c4" \
+    -H "Idempotency-Key: pay-key-001" -d '{}'
+```
+```json
+{"payment_id": 1, "booking_reference": "TPK-E5ZCWD", "status": "pending", "amount_paisa": 9412575}
+```
+`HTTP 202` — the identical request replayed with the same key returns this
+exact same body, `HTTP 202` again, with no second payment row created.
+The same key with a different body instead returns:
+```json
+{"error": {"code": "idempotency_key_conflict", "message": "This Idempotency-Key was already used with a different request payload."}}
+```
+`HTTP 409`
+
+**3. The PSP's signed webhook arrives, ticketing happens synchronously**
+
+```
+$ ts=$(date +%s)
+$ body='{"event_id":"evt-demo-1","payment_reference":"psp_...","status":"succeeded"}'
+$ sig=$(php -r 'echo hash_hmac("sha256",$argv[1].".".$argv[2],$argv[3]);' "$ts" "$body" "local-dev-psp-shared-secret")
+$ curl -X POST http://127.0.0.1:8000/api/webhooks/psp \
+    -H "Content-Type: application/json" -H "X-Psp-Timestamp: $ts" -H "X-Psp-Signature: $sig" -d "$body"
+```
+```json
+{"status": "ticketed", "booking_status": "ticketed", "pnr": "6FZ3PN"}
+```
+`HTTP 200`
+
+**4. Cancel the ticketed booking (refundable fare, total minus the flat fee)**
+
+```
+$ curl -X POST http://127.0.0.1:8000/api/v1/bookings/TPK-E5ZCWD/cancel \
+    -H "Authorization: Bearer erowCE3HjHGEQ1rDtabaM2MUV9zaflSkGbXi1EvjvrAJDyyf"
+```
+```json
+{"status": "partially_refunded", "refunded_paisa": 9262575}
+```
+`HTTP 200` — `9412575 - 150000` (the flat refundable-cancellation fee) `=
+9262575`, exactly.
+
 ## Concurrency
 
 The last-seat race is settled by one atomic statement —
@@ -299,6 +377,36 @@ its duration, and in SQLite's default rollback-journal mode (not WAL)
 that blocks readers too, not just other writers. The fix at that point is
 Postgres/MySQL with row-level locking, which this codebase already uses
 (`lockForUpdate()`) in a way that's portable to either without changes.
+
+## What I'd improve with more time
+
+Beyond the scale fixes above:
+
+- **Real passenger data capture at hold time** — CNIC/passport, date of
+  birth, and an explicit fare-rules acknowledgement, per the `RESEARCH.md`
+  findings. Right now a hold only takes a free-text `passenger_name`;
+  that's the single biggest gap between this and something travel.pk
+  could actually put in front of a customer.
+- **Queue the airline ticketing call** off the webhook request (see
+  above) — also makes it retryable/observable independently of the
+  webhook's own delivery semantics, instead of both living or dying
+  together in one request.
+- **Per-fare cancellation terms** instead of one global fee — `fare_rules`
+  is already stored and snapshotted per booking; the refund calculation
+  should read its fee from there instead of a single config value, once
+  real supplier fare-rules payloads are available to populate it.
+- **Rate limiting** on the public endpoints (`holds`, `payments`) — 
+  nothing stops one partner key from hammering `POST /holds` today.
+- **An OpenAPI spec** generated from the routes/form-requests, so the API
+  section of this README can't drift from the actual code.
+- **Structured, correlatable logging** (one request/webhook id threaded
+  through hold → payment → ticketing) — right now a reviewer has to
+  follow a booking by its reference through the DB tables directly;
+  production would want this in logs/traces instead.
+- **A real self-HTTP loop for the PSP webhook demo**, as an opt-in mode
+  alongside the current in-process delivery — closer to how a real PSP
+  integration is smoke-tested, at the cost of needing a live server
+  during that specific test.
 
 ## Environment
 
