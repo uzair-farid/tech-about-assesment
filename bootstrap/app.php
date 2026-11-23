@@ -14,7 +14,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'partner.auth' => \App\Http\Middleware\AuthenticatePartner::class,
-            'customer.auth' => \App\Http\Middleware\AuthenticateCustomerToken::class,
+            'booking.auth' => \App\Http\Middleware\AuthenticateBookingAccess::class,
+            'psp.signature' => \App\Http\Middleware\VerifyPspSignature::class,
             'idempotent' => \App\Http\Middleware\EnsureIdempotencyKey::class,
         ]);
     })
