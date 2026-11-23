@@ -38,6 +38,9 @@ return [
     'psp' => [
         'webhook_secret' => env('PSP_WEBHOOK_SECRET', 'local-dev-psp-shared-secret'),
         'webhook_tolerance_seconds' => (int) env('PSP_WEBHOOK_TOLERANCE_SECONDS', 300),
+        // Disabled under automated tests, which drive the webhook endpoint
+        // directly so they can assert on exact timing and outcomes.
+        'simulate_webhook' => (bool) env('PSP_SIMULATE_WEBHOOK', true),
     ],
 
     'airline' => [

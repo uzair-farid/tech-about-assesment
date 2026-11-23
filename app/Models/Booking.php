@@ -14,6 +14,10 @@ class Booking extends Model
 {
     use HasFactory;
 
+    protected $attributes = [
+        'refunded_paisa' => 0,
+    ];
+
     protected $fillable = [
         'reference',
         'fare_id',
@@ -80,9 +84,15 @@ class Booking extends Model
         return $this->hasOne(AirlineAttempt::class);
     }
 
+    /**
+     * The 20-minute window covers deciding to pay AND the PSP confirming
+     * it - a payment started just before expiry can still have its
+     * success webhook land after the window closes, so the seat
+     * commitment lapses for payment_pending too, not just hold.
+     */
     public function isHoldExpired(): bool
     {
-        return $this->status === BookingStatus::Hold
+        return in_array($this->status, [BookingStatus::Hold, BookingStatus::PaymentPending], true)
             && $this->expires_at !== null
             && $this->expires_at->isPast();
     }
